@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pose Estimation</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+        }
+        #video-container {
+            margin-bottom: 20px;
+            position: relative;
+            width: 640px;
+            height: 480px;
+            margin: 0 auto;
+        }
+        select, button {
+            margin: 10px;
+            padding: 5px 10px;
+        }
+        #complete-message {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            font-weight: bold;
+            color: #4CAF50;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 10;
+        }
+        #try-again-btn {
+            display: none;
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 11;
+        }
+    </style>
+</head>
+<body>
+    <h1>Pose Estimation</h1>
+    <div id="video-container">
+        <img id="video-feed" src="" width="640" height="480" style="display: none;">
+        <div id="complete-message">Complete!!</div>
+        <button id="try-again-btn">Try Again</button>
+    </div>
+    <div>
+        <select id="pose-select">
+            {% for key, value in poses.items() %}
+                <option value="{{ key }}">{{ value }}</option>
+            {% endfor %}
+        </select>
+        <button id="set-pose">Set Pose</button>
+    </div>
+    <button id="start-video">Start Video</button>
+    <button id="stop-video" style="display: none;">Stop Video</button>
+    <button id="stop-save">Stop and Save</button>
+
+    <script>
+        $(document).ready(function() {
+            let videoStream;
+
+            function resetUI() {
+                $('#video-feed').hide();
+                $('#complete-message').hide();
+                $('#try-again-btn').hide();
+                $('#stop-video').hide();
+                $('#start-video').show();
+            }
+
+            function showComplete() {
+                $('#video-feed').hide();
+                $('#complete-message').show();
+                $('#try-again-btn').show();
+                $('#stop-video').hide();
+                $('#start-video').hide();
+            }
+
+            $('#set-pose').click(function() {
+                var selectedPose = $('#pose-select').val();
+                $.post('/set_pose', {pose: selectedPose}, function(data) {
+                    alert(data.message);
+                });
+            });
+
+            $('#start-video').click(function() {
+                resetUI();
+                $('#video-feed').attr('src', "{{ url_for('video_feed') }}").show();
+                $('#stop-video').show();
+                $(this).hide();
+                startVideoProcessing();
+            });
+
+            $('#stop-video').click(function() {
+                resetUI();
+            });
+
+            $('#try-again-btn').click(function() {
+                resetUI();
+            });
+
+            $('#stop-save').click(function() {
+                $.post('/stop_and_save', function(data) {
+                    alert(data.message);
+                }).fail(function(jqXHR) {
+                    alert('Error: ' + jqXHR.responseJSON.message);
+                });
+            });
+
+            function startVideoProcessing() {
+                const videoFeed = document.getElementById('video-feed');
+
+                fetch("{{ url_for('video_feed') }}")
+                    .then(response => {
+                        const reader = response.body.getReader();
+                        return new ReadableStream({
+                            start(controller) {
+                                return pump();
+                                function pump() {
+                                    return reader.read().then(({ done, value }) => {
+                                        if (done) {
+                                            controller.close();
+                                            return;
+                                        }
+                                        controller.enqueue(value);
+                                        const chunk = new TextDecoder().decode(value);
+                                        if (chunk.includes('COMPLETE')) {
+                                            showComplete();
+                                            return;
+                                        }
+                                        return pump();
+                                    });
+                                }
+                            }
+                        });
+                    })
+                    .then(stream => new Response(stream))
+                    .then(response => response.blob())
+                    .then(blob => {
+                        videoFeed.src = URL.createObjectURL(blob);
+                    })
+                    .catch(err => console.error(err));
+            }
+        });
+    </script>
+</body>
+</html>
